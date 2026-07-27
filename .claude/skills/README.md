@@ -34,6 +34,11 @@ Integrate the gateway with AI agents and LLM applications. Provides client libra
 
 **Use when:** Building an AI agent that needs to use the sandbox gateway as a tool.
 
+### 🌐 setup-browser.md
+Setup and configure browser automation (Playwright) for the sandbox. Covers installation, system dependencies, troubleshooting, and verification.
+
+**Use when:** Need to enable browser automation features or troubleshoot Playwright installation issues.
+
 ## How to Use Skills
 
 In Claude Code, you can invoke skills by name when needed. For example:
