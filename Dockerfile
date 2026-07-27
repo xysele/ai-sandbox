@@ -12,8 +12,12 @@ COPY . .
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o ai-sandbox-go -ldflags="-w -s" .
 
-# Final stage
-FROM debian:bullseye-slim
+# Final stage. Keep Bullseye for the existing system packages, but use the
+# official Node image because Debian Bullseye only provides Node.js 12.
+FROM node:20-bullseye-slim
+
+ENV NODE_PATH=/usr/local/lib/node_modules \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install virtual desktop, GUI automation tools, and development tools
 #   xvfb       - Virtual frame buffer (X server without display)
@@ -24,7 +28,7 @@ FROM debian:bullseye-slim
 #   git        - Version control
 #   python3    - Python runtime
 #   python3-pip - Python package manager
-#   nodejs/npm - JavaScript runtime
+#   Node.js/npm are provided by the base image
 #   curl/wget  - HTTP clients
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb \
@@ -39,8 +43,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         python3 \
         python3-pip \
-        nodejs \
-        npm \
         vim \
         nano \
         zip \
@@ -62,7 +64,8 @@ RUN pip3 install --no-cache-dir \
 # Install Playwright for browser automation
 RUN npm install -g playwright-chromium@1.40.0 && \
     playwright install chromium --with-deps && \
-    rm -rf /root/.cache
+    npm cache clean --force && \
+    rm -rf /root/.cache /var/lib/apt/lists/*
 
 WORKDIR /app
 
