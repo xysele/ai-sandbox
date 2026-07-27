@@ -344,34 +344,152 @@ def _git_auth_env(access_key: str) -> Dict[str, str]:
     return env
 
 
-def _push_code(
-    namespace: str,
-    studio_name: str,
-    access_key: str,
-    branch: str,
-    force_push: bool,
-) -> None:
-    git_url = f"{MODELSCOPE_ENDPOINT}/studios/{namespace}/{studio_name}.git"
+def _git_auth_config() -> list[str]:
     credential_helper = (
         '!f() { printf "%s\\n" "username=oauth2" "password=$MODELSCOPE_GIT_TOKEN"; }; f'
     )
-    command = [
+    return [
         "-c",
         "credential.helper=",
         "-c",
         f"credential.helper={credential_helper}",
         "-c",
         "credential.useHttpPath=true",
-        "push",
     ]
-    if force_push:
-        command.append("--force")
-    command.extend([git_url, f"HEAD:{branch}"])
 
+
+def _remote_branch_head(
+    git_url: str,
+    branch: str,
+    access_key: str,
+) -> Optional[str]:
+    output = _run_git(
+        [
+            *_git_auth_config(),
+            "ls-remote",
+            "--heads",
+            git_url,
+            f"refs/heads/{branch}",
+        ],
+        env=_git_auth_env(access_key),
+    )
+    if not output:
+        return None
+    fields = output.splitlines()[0].split()
+    if len(fields) != 2:
+        raise DeploymentError(f"Git returned an invalid remote ref: {output}")
+    return fields[0]
+
+
+def _fetch_remote_branch(
+    git_url: str,
+    branch: str,
+    access_key: str,
+) -> str:
+    _run_git(
+        [
+            *_git_auth_config(),
+            "fetch",
+            "--no-tags",
+            git_url,
+            f"refs/heads/{branch}",
+        ],
+        env=_git_auth_env(access_key),
+    )
+    return _run_git(["rev-parse", "FETCH_HEAD"])
+
+
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    completed = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode in {0, 1}:
+        return completed.returncode == 0
+    raise DeploymentError(
+        "git merge-base failed "
+        f"({completed.returncode})\nstdout:\n{completed.stdout}\n"
+        f"stderr:\n{completed.stderr}"
+    )
+
+
+def _create_deployment_commit(local_head: str, remote_head: str) -> str:
+    tree = _run_git(["rev-parse", f"{local_head}^{{tree}}"])
+    short_head = _run_git(["rev-parse", "--short", local_head])
+    author_name = _run_git(["show", "-s", "--format=%an", local_head])
+    author_email = _run_git(["show", "-s", "--format=%ae", local_head])
+    identity_env = os.environ.copy()
+    identity_env.update(
+        {
+            "GIT_AUTHOR_NAME": author_name,
+            "GIT_AUTHOR_EMAIL": author_email,
+            "GIT_COMMITTER_NAME": author_name,
+            "GIT_COMMITTER_EMAIL": author_email,
+        }
+    )
+    return _run_git(
+        [
+            "commit-tree",
+            tree,
+            "-p",
+            remote_head,
+            "-p",
+            local_head,
+            "-m",
+            f"Deploy {short_head} to ModelScope Studio",
+        ],
+        env=identity_env,
+    )
+
+
+def _push_ref(
+    git_url: str,
+    source: str,
+    branch: str,
+    access_key: str,
+) -> None:
+    _run_git(
+        [
+            *_git_auth_config(),
+            "push",
+            git_url,
+            f"{source}:refs/heads/{branch}",
+        ],
+        env=_git_auth_env(access_key),
+    )
+
+
+def _push_code(
+    namespace: str,
+    studio_name: str,
+    access_key: str,
+    branch: str,
+) -> None:
+    git_url = f"{MODELSCOPE_ENDPOINT}/studios/{namespace}/{studio_name}.git"
+    local_head = _run_git(["rev-parse", "HEAD"])
+    local_tree = _run_git(["rev-parse", f"{local_head}^{{tree}}"])
     last_error: Optional[DeploymentError] = None
     for attempt in range(1, 4):
         try:
-            _run_git(command, env=_git_auth_env(access_key))
+            if _remote_branch_head(git_url, branch, access_key) is None:
+                source = local_head
+            else:
+                remote_head = _fetch_remote_branch(git_url, branch, access_key)
+                remote_tree = _run_git(["rev-parse", f"{remote_head}^{{tree}}"])
+                if remote_tree == local_tree:
+                    print("  Remote branch already has the same files as local HEAD.")
+                    return
+                if _is_ancestor(remote_head, local_head):
+                    source = local_head
+                else:
+                    print(
+                        "  Preserving the remote branch history in a deployment "
+                        "merge commit."
+                    )
+                    source = _create_deployment_commit(local_head, remote_head)
+            _push_ref(git_url, source, branch, access_key)
             return
         except DeploymentError as exc:
             last_error = exc
@@ -502,11 +620,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="remote Studio branch; default master",
     )
     parser.add_argument(
-        "--force-push",
-        action="store_true",
-        help="allow a destructive non-fast-forward update of the Studio branch",
-    )
-    parser.add_argument(
         "--no-wait",
         action="store_true",
         help="trigger reset_restart but do not wait for Running",
@@ -566,11 +679,10 @@ def deploy(args: argparse.Namespace) -> int:
             )
         print(f"Reusing Studio {namespace}/{studio_name}.")
 
-    force_push = args.force_push or created
     if created:
         print(
-            f"Pushing HEAD to {branch}; replacing the new Studio's generated "
-            "initial branch..."
+            f"Pushing HEAD to {branch}; preserving the new Studio's generated "
+            "initial commit..."
         )
     else:
         print(f"Pushing HEAD to {branch}...")
@@ -579,7 +691,6 @@ def deploy(args: argparse.Namespace) -> int:
         studio_name,
         access_key,
         branch,
-        force_push,
     )
 
     action = client.set_env(namespace, studio_name, "GATEWAY_TOKEN", gateway_token)

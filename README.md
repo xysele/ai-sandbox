@@ -436,8 +436,8 @@ python3 deploy.py --namespace your-namespace --studio-name ai-sandbox-go
 部署前需要了解以下行为：
 
 - 只会推送已经提交的内容；工作区不干净时脚本会停止，避免漏掉本地改动。
-- 本轮新建 Studio 时会覆盖平台生成的初始 `master`，使其与本地仓库建立一致历史。
-- 复用已有 Studio 时默认执行普通的 `HEAD:master` 推送，不会覆盖远端历史；只有显式传入 `--force-push` 才会强制推送。
+- 推送前会读取远端 `master`。如果本地与远端历史分叉，脚本会保留远端提交并生成一个部署合并提交；该提交的文件内容与本地 `HEAD` 完全一致。
+- ModelScope 的 `master` 是受保护分支，脚本始终使用普通快进推送，不会强制覆盖远端历史。
 - 优先使用本地环境变量 `GATEWAY_TOKEN`，其次复用 `cs_token.txt`，都不存在时才生成新 Token。
 - Gateway Token 会写入权限为 `0600` 的 `cs_token.txt`，但不会打印到终端。
 - Git 认证通过临时 credential helper 从环境读取 Access Token，不会把 Token 写进 remote URL。
@@ -450,9 +450,6 @@ python3 deploy.py --no-wait
 
 # 调整等待时间和轮询间隔
 python3 deploy.py --wait-timeout 1200 --poll-interval 15
-
-# 明确允许覆盖远端 master 历史
-python3 deploy.py --force-push
 ```
 
 ModelScope.ai 的 Docker Studio 由仓库中的 `Dockerfile` 构建，因此平台 SDK 版本为空是正常情况。免费实例类型由 `/api/v1/studios/free_instance` 动态获取。
