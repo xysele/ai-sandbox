@@ -51,11 +51,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/", handlers.Root)
 	s.mux.HandleFunc("/health", handlers.Health(s.config))
 
-	// UI 管理界面（需要 cookie 认证，但不是 token header）
-	s.mux.HandleFunc("/ui", handlers.UIHandler(s.config))
-	s.mux.HandleFunc("/ui/auth", handlers.UIAuthHandler(s.config))
-	s.mux.HandleFunc("/ui/logout", handlers.UILogoutHandler())
-
 	// 命令与代码执行
 	s.mux.HandleFunc("/exec", handlers.ExecShell)
 	s.mux.HandleFunc("/run_code", handlers.RunCode)
@@ -101,7 +96,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/http_fetch", handlers.HTTPFetch)
 }
 
-// authMiddleware 接受 X-Gateway-Token 或管理页会话 Cookie。
+// authMiddleware 校验 X-Gateway-Token。
 //
 // 用自定义头而不是标准 Authorization，是因为魔搭创空间的反向代理会剥掉
 // Authorization 头，token 传不进来。
@@ -110,9 +105,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		"/":            true,
 		"/health":      true,
 		"/favicon.ico": true,
-		"/ui":          true,
-		"/ui/auth":     true,
-		"/ui/logout":   true,
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +113,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if !s.checkAuth(r.Header.Get("X-Gateway-Token")) && !handlers.HasValidSession(r) {
+		if !s.checkAuth(r.Header.Get("X-Gateway-Token")) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"success":false,"error":"invalid or missing X-Gateway-Token"}` + "\n"))

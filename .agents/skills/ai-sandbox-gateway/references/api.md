@@ -5,8 +5,7 @@ Use this reference for request fields, response semantics, limits, and endpoint-
 ## Connection contract
 
 - Join an endpoint to the configured base URL without discarding a deployment path prefix. For example, base `https://host/proxy/7860` plus `/exec` becomes `https://host/proxy/7860/exec`.
-- `GET /`, `GET /health`, `/favicon.ico`, `/ui`, `/ui/auth`, and `/ui/logout` do not require the gateway header. The UI login validates the gateway token itself and establishes a session cookie.
-- Other endpoints accept either `X-Gateway-Token: <token>` or a valid `sandbox_session` cookie. Non-browser clients should use the header.
+- Send `X-Gateway-Token: <token>` on every endpoint except `GET /`, `GET /health`, and `/favicon.ico`.
 - Send `Content-Type: application/json` with JSON requests.
 - Expect JSON responses. Most use `{"success":true,...}` or `{"success":false,"error":"..."}`.
 - Inspect JSON even on HTTP 200. Command failures and some operation failures use a 200 response with `success: false`.
