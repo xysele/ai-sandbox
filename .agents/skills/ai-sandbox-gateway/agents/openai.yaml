@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Sandbox Gateway"
+  short_description: "Operate remote AI sandboxes through the gateway"
+  default_prompt: "Use $ai-sandbox-gateway to execute this task in the configured remote sandbox."

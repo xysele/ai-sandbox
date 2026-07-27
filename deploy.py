@@ -13,7 +13,7 @@ import time
 import urllib.parse
 
 # Configuration
-MODELSCOPE_API = "api.modelscope.cn"
+MODELSCOPE_API = "api.modelscope.ai"
 NAMESPACE = os.getenv("MODELSCOPE_NAMESPACE", "your-namespace")  # Change this
 STUDIO_NAME = "ai-sandbox-go"
 API_KEY = os.getenv("MODELSCOPE_API_KEY")  # Set this environment variable
@@ -116,7 +116,7 @@ def push_code():
     print("[3/6] Pushing code to Studio repository...")
 
     # Get Studio's git URL
-    git_url = f"https://www.modelscope.cn/studios/{NAMESPACE}/{STUDIO_NAME}.git"
+    git_url = f"https://www.modelscope.ai/studios/{NAMESPACE}/{STUDIO_NAME}.git"
 
     # Check if git remote exists
     result = subprocess.run(
@@ -206,12 +206,12 @@ def save_token(token):
 
 def print_summary(token):
     """Print deployment summary"""
-    base_url = f"https://www.modelscope.cn/api/v1/studios/{NAMESPACE}/{STUDIO_NAME}/proxy/7860"
+    base_url = f"https://www.modelscope.ai/api/v1/studios/{NAMESPACE}/{STUDIO_NAME}/proxy/7860"
 
     print("\n" + "="*70)
     print("🎉 DEPLOYMENT SUCCESSFUL!")
     print("="*70)
-    print(f"\n📍 Studio URL: https://www.modelscope.cn/studios/{NAMESPACE}/{STUDIO_NAME}")
+    print(f"\n📍 Studio URL: https://www.modelscope.ai/studios/{NAMESPACE}/{STUDIO_NAME}")
     print(f"\n🔗 API Base URL:\n   {base_url}/")
     print(f"\n🔑 Gateway Token:\n   {token}")
     print(f"\n💾 Token saved to: cs_token.txt")
@@ -267,7 +267,7 @@ def main():
     # Step 5: Wait for running
     if not wait_for_running():
         print("\n⚠ Studio may still be building. Check the Studio page:")
-        print(f"   https://www.modelscope.cn/studios/{NAMESPACE}/{STUDIO_NAME}")
+        print(f"   https://www.modelscope.ai/studios/{NAMESPACE}/{STUDIO_NAME}")
 
     # Step 6: Save token and print summary
     save_token(token)
