@@ -39,6 +39,11 @@ Setup and configure browser automation (Playwright) for the sandbox. Covers inst
 
 **Use when:** Need to enable browser automation features or troubleshoot Playwright installation issues.
 
+### 📊 monitor-sandbox.md
+Monitor the gateway in production with health checks, alerts, and performance metrics. Includes integration with Kubernetes, Docker, Nagios, and custom monitoring scripts.
+
+**Use when:** Setting up production monitoring, configuring alerts, or troubleshooting monitoring systems.
+
 ## How to Use Skills
 
 In Claude Code, you can invoke skills by name when needed. For example:
