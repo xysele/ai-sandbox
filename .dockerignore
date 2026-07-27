@@ -1,0 +1,33 @@
+# .dockerignore
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+docs/
+*.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+ai-sandbox-go
+*.exe
+
+# Deployment
+deploy.py
+cs_token.txt
+
+# Temporary
+tmp/
+temp/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

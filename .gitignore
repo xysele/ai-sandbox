@@ -1,0 +1,59 @@
+# .gitignore
+
+# Binaries
+ai-sandbox-go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Deployment
+cs_token.txt
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Environment
+.env
+.env.local
+*.local
+
+# Screenshots
+screenshots/
+*.png
+*.jpg
+
+# Archives
+*.tar.gz
+*.zip
+*.tgz
+
+# OS
+Thumbs.db
