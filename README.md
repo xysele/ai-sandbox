@@ -403,40 +403,71 @@ python3 .agents/skills/ai-sandbox-gateway/scripts/gateway_call.py \
 
 ## 部署到 ModelScope Studio
 
-### 手动部署
+`deploy.py` 使用 `modelscope.ai` 当前的 Studio API。脚本会完成以下操作：
 
-1. 创建 Docker 类型的 Studio。
-2. 将仓库内容推送到 Studio 仓库。
-3. 在 Studio 的 Secret 或环境变量中设置 `GATEWAY_TOKEN`。
-4. 暴露容器端口 `7860`。
-5. 部署完成后先请求 `/health`，再用带 Token 的 `/system/info` 验证鉴权。
+1. 通过 `POST /api/v1/login` 登录并保存 Cookie 和 CSRF Token。
+2. 创建或复用 Docker Studio。
+3. 将当前 Git 提交推送到 Studio 的 `master` 分支。
+4. 新增或更新 Studio 环境变量 `GATEWAY_TOKEN`。
+5. 调用 `reset_restart` 并等待实例进入 `Running`。
+6. 输出 Studio 页面和运行实例返回的 `IndependentUrl`。
 
-通过代理访问时，基础 URL 可能包含路径前缀，例如：
-
-```text
-https://www.modelscope.ai/api/v1/studios/<namespace>/ai-sandbox-go/proxy/7860
-```
-
-调用端点时必须保留这段前缀。
-
-### 部署脚本
-
-`deploy.py` 可以创建或复用名为 `ai-sandbox-go` 的私有 Studio、设置 Token、推送代码、触发构建并等待实例启动：
+先执行公开能力检查。这个命令不需要 Access Token，也不会修改远端：
 
 ```bash
-export MODELSCOPE_NAMESPACE='your-namespace'
-export MODELSCOPE_API_KEY='your-api-key'
+python3 deploy.py --check
+```
+
+部署时优先使用 `MODELSCOPE_ACCESS_KEY`。旧名称 `MODELSCOPE_API_KEY` 仍然兼容：
+
+```bash
+export MODELSCOPE_ACCESS_KEY='ms-your-access-token'
 python3 deploy.py
 ```
 
-运行前需要了解脚本的行为：
+命名空间默认从登录结果中读取，不必手工设置。需要部署到组织或其他命名空间时再指定：
 
-- 会新增或更新名为 `modelscope` 的 Git remote
-- 会执行 `git push modelscope HEAD:main -f`
-- 会生成新的 `GATEWAY_TOKEN` 并写入 Studio Secret
-- 会把 Token 保存到本地 `cs_token.txt`；该文件已被 `.gitignore` 忽略
+```bash
+python3 deploy.py --namespace your-namespace --studio-name ai-sandbox-go
+```
 
-如果远端 `main` 分支包含需要保留的提交，不要直接运行该脚本，先改用普通推送或调整脚本。
+脚本默认创建公开 Studio（`visibility=1`），因为网关本身已经使用 `GATEWAY_TOKEN` 鉴权。公开 Studio 的仓库源码也可能公开可见，不要把凭据写进仓库；运行时凭据应通过 Studio 环境变量注入。若账户支持其他可见性值，可通过 `--visibility` 显式覆盖。
+
+部署前需要了解以下行为：
+
+- 只会推送已经提交的内容；工作区不干净时脚本会停止，避免漏掉本地改动。
+- 本轮新建 Studio 时会覆盖平台生成的初始 `master`，使其与本地仓库建立一致历史。
+- 复用已有 Studio 时默认执行普通的 `HEAD:master` 推送，不会覆盖远端历史；只有显式传入 `--force-push` 才会强制推送。
+- 优先使用本地环境变量 `GATEWAY_TOKEN`，其次复用 `cs_token.txt`，都不存在时才生成新 Token。
+- Gateway Token 会写入权限为 `0600` 的 `cs_token.txt`，但不会打印到终端。
+- Git 认证通过临时 credential helper 从环境读取 Access Token，不会把 Token 写进 remote URL。
+
+常用选项：
+
+```bash
+# 触发重启后立即返回，不等待 Running
+python3 deploy.py --no-wait
+
+# 调整等待时间和轮询间隔
+python3 deploy.py --wait-timeout 1200 --poll-interval 15
+
+# 明确允许覆盖远端 master 历史
+python3 deploy.py --force-push
+```
+
+ModelScope.ai 的 Docker Studio 由仓库中的 `Dockerfile` 构建，因此平台 SDK 版本为空是正常情况。免费实例类型由 `/api/v1/studios/free_instance` 动态获取。
+
+运行实例的域名由 ModelScope 分配，不能在部署前可靠推导。应使用脚本最后输出的 `Runtime base URL`，不要拼接旧的 `/api/v1/studios/<namespace>/<name>/proxy/7860` 地址。
+
+### 手动部署
+
+也可以在 `https://www.modelscope.ai/studios/create` 手工创建 Docker Studio，然后：
+
+1. 在 Studio 设置中新增环境变量 `GATEWAY_TOKEN`。
+2. 将本仓库已提交的代码推送到 Studio Git 地址的 `master` 分支。
+3. 在 Studio 页面执行重启。
+4. 等待状态进入 `Running` 后，从 Studio 详情获取运行实例 URL。
+5. 先请求 `/health`，再用带 `X-Gateway-Token` 的 `/system/info` 检查网关鉴权。
 
 ## 安全边界
 
