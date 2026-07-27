@@ -98,13 +98,15 @@ Docker 镜像将 `SCREENSHOT_DIR` 设置为 `/tmp/cs_screenshots`。`entrypoint.
 
 ## 鉴权和请求约定
 
-`/` 和 `/health` 是公开端点。其他 API 请求都要携带：
+`/`、`/health` 和管理页登录流程（`/ui`、`/ui/auth`、`/ui/logout`）不要求请求头鉴权。其他 API 请求可以携带：
 
 ```http
 X-Gateway-Token: <GATEWAY_TOKEN>
 ```
 
 项目使用自定义请求头，是因为部分托管平台的反向代理不会向应用转发 `Authorization`。Token 通过常量时间比较进行校验。
+
+浏览器也可以先在 `/ui` 提交 `GATEWAY_TOKEN`。登录成功后，服务会设置有效期为 1 小时的 `HttpOnly`、`SameSite=Strict` 会话 Cookie；通过 HTTPS 访问时还会设置 `Secure`。同源管理页请求可以凭该 Cookie 调用 API，不需要在 JavaScript 中保存 Token。非浏览器客户端应继续使用 `X-Gateway-Token`。
 
 JSON 请求还应设置：
 
@@ -288,11 +290,13 @@ curl -sS "$SANDBOX_URL/http_fetch" \
 | `GET` | `/` | 最小存活探针，无需鉴权 |
 | `GET` | `/health` | 运行时和 GUI 可用性，无需鉴权 |
 | `GET` / `POST` | `/system/info` | CPU、内存、磁盘和任务统计 |
-| `GET` | `/ui` | HTML 管理页，见下方限制 |
+| `GET` | `/ui` | HTML 登录页或管理页 |
 | `POST` | `/ui/auth` | 管理页登录 |
 | `GET` | `/ui/logout` | 管理页退出 |
 
-当前全局鉴权中间件也会拦截 `/ui`、`/ui/auth` 和 `/ui/logout`。普通浏览器无法为表单流程自动添加 `X-Gateway-Token`，因此当前版本应以 JSON API 为主；只有在受控反向代理为这些请求注入鉴权头时，管理页流程才能使用。
+在浏览器打开 `/ui`，输入 `GATEWAY_TOKEN` 即可登录。登录成功后，管理页通过会话 Cookie 调用受保护的 API；退出或会话超过 1 小时后需要重新登录。
+
+ModelScope 可能还会为 Studio 入口启用平台访问控制。此时第一次打开管理页，应把部署脚本输出的 Tokenized health URL 中的 `/health` 改为 `/ui`，并保留 `studio_token` 查询参数。平台验证后会设置自己的 `studio_token` Cookie，网关登录则另外设置 `sandbox_session` Cookie；两个 Cookie 作用不同，可以同时使用。不要把 `GATEWAY_TOKEN` 放进 URL。
 
 ### 命令和任务
 
@@ -484,7 +488,7 @@ ModelScope.ai 的 Docker Studio 由仓库中的 `Dockerfile` 构建，因此平�
 
 ### 请求返回 401
 
-检查请求头名称是否为 `X-Gateway-Token`，并确认 Token 与当前进程使用的值一致。未显式配置 Token 时，服务重启会生成新的临时值。
+API 客户端应检查请求头名称是否为 `X-Gateway-Token`，并确认 Token 与当前进程使用的值一致。管理页应重新打开 `/ui` 登录，确认浏览器允许该站点保存 Cookie。未显式配置 Token 时，服务重启会生成新的临时值，进程内的管理页会话也会随重启丢失。
 
 ### `/health` 正常，但其他接口返回 404
 
