@@ -9,14 +9,25 @@ Use the gateway as a privileged remote execution environment. Keep every action 
 
 ## Configure access
 
-Obtain the deployed base URL and token from the user, task context, or environment. Prefer these variables:
+Obtain the deployed base URL and credentials-file path from the user, task context, or environment. Prefer these variables:
 
 ```bash
 export AI_SANDBOX_URL="https://host.example/proxy/7860"
-export GATEWAY_TOKEN="..."
+export AI_SANDBOX_CREDENTIALS="/absolute/path/to/cs_token.txt"
 ```
 
-Never print, commit, or place the token in a URL. Prefer `GATEWAY_TOKEN` over the helper's `--token` option so the secret does not appear in process arguments. Preserve any path prefix in the base URL.
+The deployment script writes this JSON with mode `0600`:
+
+```json
+{
+  "gateway_token": "...",
+  "studio_token": "..."
+}
+```
+
+The helper sends `gateway_token` only in `X-Gateway-Token` and automatically adds `studio_token` to every request URL for ModelScope's outer access control. Never print or commit either token, and never put the Gateway Token in a URL. Do not parse or inject this file with shell assignments; let the helper load it so shell expansion order cannot drop a value. `GATEWAY_TOKEN` and `MODELSCOPE_STUDIO_TOKEN` remain supported for non-ModelScope or legacy setups.
+
+Preserve any path prefix in the base URL. Provide the runtime base URL, not a tokenized health URL or an endpoint URL.
 
 Set the skill location when invoking its helper from outside this directory:
 
@@ -25,7 +36,7 @@ SKILL_DIR=".agents/skills/ai-sandbox-gateway"
 python3 "$SKILL_DIR/scripts/gateway_call.py" health
 ```
 
-`/health` is public and reports runtime and GUI readiness. Treat a successful health check as connectivity evidence only; make one harmless authenticated call such as `/system/info` when token validity also needs checking.
+`/health` is public at the gateway layer and reports runtime and GUI readiness, but a hosting platform may still protect it with the Studio Token. Treat a successful health check as connectivity evidence only; make one harmless authenticated call such as `/system/info` when Gateway Token validity also needs checking.
 
 ## Choose the operation
 
@@ -63,18 +74,13 @@ python3 "$SKILL_DIR/scripts/gateway_call.py" call /run_code --data-file request.
 
 The helper prints response JSON to stdout, diagnostics to stderr, and exits nonzero for HTTP errors, transport errors, `success: false`, or failed/cancelled tasks. It accepts `SANDBOX_BASE_URL` as a fallback alias for `AI_SANDBOX_URL`.
 
-Use direct HTTP only when the helper is unavailable:
-
-```bash
-curl -sS "$AI_SANDBOX_URL/exec" \
-  -H "X-Gateway-Token: $GATEWAY_TOKEN" \
-  -H "Content-Type: application/json" \
-  --data '{"command":"uname -a"}'
-```
+Use direct HTTP only when the helper is unavailable. Parse the credentials file with a JSON parser, merge `studio_token` into the endpoint query with a URL library, and send `gateway_token` in `X-Gateway-Token`; do not use shell string concatenation for either operation.
 
 ## Handle results
 
 Inspect both the HTTP outcome and the JSON body. Most endpoints return `success`; `/health` returns `ok`. A `200` response does not guarantee the requested operation succeeded: `/exec` reports nonzero commands with `success: false`, and `/http_fetch` reports the upstream status separately as `status_code`.
+
+Distinguish the two authentication layers. A ModelScope-shaped `403` usually means the Studio Token is missing or stale before the request reaches the gateway. A gateway `401` with `invalid or missing X-Gateway-Token` means the Gateway Token is missing or stale. Recheck the credentials file instead of treating either response as proof that the runtime is down.
 
 For asynchronous work, poll until `completed`, `failed`, or `cancelled`. Use `stream=true` only when intermediate output is useful. Finished tasks remain available for about 30 minutes and the table holds at most 200 tasks.
 

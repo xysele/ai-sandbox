@@ -381,8 +381,8 @@ curl -sS "$SANDBOX_URL/http_fetch" \
 支持 skill 的 Agent 可以通过 `$ai-sandbox-gateway` 调用。配套脚本只依赖 Python 标准库：
 
 ```bash
-export AI_SANDBOX_URL='http://127.0.0.1:7860'
-export GATEWAY_TOKEN='replace-with-a-long-random-token'
+export AI_SANDBOX_URL='https://runtime.example'
+export AI_SANDBOX_CREDENTIALS="$PWD/cs_token.txt"
 
 python3 .agents/skills/ai-sandbox-gateway/scripts/gateway_call.py health
 
@@ -393,7 +393,7 @@ python3 .agents/skills/ai-sandbox-gateway/scripts/gateway_call.py \
   task --timeout 600 'npm ci && npm test'
 ```
 
-脚本还提供 `upload` 和 `download` 子命令，适合在本地文件与远程容器之间传输二进制内容。
+脚本从凭据文件中读取 `gateway_token` 和 `studio_token`：前者只通过 `X-Gateway-Token` 请求头发送，后者会自动合并到每个 ModelScope 请求的查询参数。不要用 shell 变量拼接或解析该文件。脚本还提供 `upload` 和 `download` 子命令，适合在本地文件与远程容器之间传输二进制内容。
 
 ## 部署到 ModelScope Studio
 
@@ -403,8 +403,9 @@ python3 .agents/skills/ai-sandbox-gateway/scripts/gateway_call.py \
 2. 创建或复用 Docker Studio。
 3. 将当前 Git 提交推送到 Studio 的 `master` 分支。
 4. 新增或更新 Studio 环境变量 `GATEWAY_TOKEN`。
-5. 调用 `reset_restart` 并等待实例进入 `Running`。
-6. 输出 Studio 页面和运行实例返回的 `IndependentUrl`。
+5. 将 Gateway Token 和 ModelScope Studio Token 写入本地凭据文件。
+6. 调用 `reset_restart` 并等待实例进入 `Running`。
+7. 输出 Studio 页面、运行实例的基础 URL 和凭据文件路径。
 
 先执行公开能力检查。这个命令不需要 Access Token，也不会修改远端：
 
@@ -432,8 +433,8 @@ python3 deploy.py --namespace your-namespace --studio-name ai-sandbox-go
 - 只会推送已经提交的内容；工作区不干净时脚本会停止，避免漏掉本地改动。
 - 推送前会读取远端 `master`。如果本地与远端历史分叉，脚本会保留远端提交并生成一个部署合并提交；该提交的文件内容与本地 `HEAD` 完全一致。
 - ModelScope 的 `master` 是受保护分支，脚本始终使用普通快进推送，不会强制覆盖远端历史。
-- 优先使用本地环境变量 `GATEWAY_TOKEN`，其次复用 `cs_token.txt`，都不存在时才生成新 Token。
-- Gateway Token 会写入权限为 `0600` 的 `cs_token.txt`，但不会打印到终端。
+- 优先使用本地环境变量 `GATEWAY_TOKEN`，其次复用 `cs_token.txt` 中的 `gateway_token`，都不存在时才生成新 Token。首次升级时也能读取旧版纯文本文件。
+- 部署成功后，Gateway Token 和 Studio Token 会以 JSON 写入权限为 `0600` 的 `cs_token.txt`，两者都不会打印到终端。
 - Git 认证通过临时 credential helper 从环境读取 Access Token，不会把 Token 写进 remote URL。
 
 常用选项：
@@ -449,6 +450,15 @@ python3 deploy.py --wait-timeout 1200 --poll-interval 15
 ModelScope.ai 的 Docker Studio 由仓库中的 `Dockerfile` 构建，因此平台 SDK 版本为空是正常情况。免费实例类型由 `/api/v1/studios/free_instance` 动态获取。
 
 运行实例的域名由 ModelScope 分配，不能在部署前可靠推导。应使用脚本最后输出的 `Runtime base URL`，不要拼接旧的 `/api/v1/studios/<namespace>/<name>/proxy/7860` 地址。
+
+把服务交给 Agent 时，只需提供 `Runtime base URL` 和 `cs_token.txt` 的绝对路径。凭据文件的结构如下，实际值不应出现在对话、日志或仓库中：
+
+```json
+{
+  "gateway_token": "...",
+  "studio_token": "..."
+}
+```
 
 ### 手动部署
 
@@ -469,7 +479,7 @@ ModelScope.ai 的 Docker Studio 由仓库中的 `Dockerfile` 构建，因此平�
 3. 服务没有用户隔离、权限分级、速率限制或配额系统。一个 Token 对应整个实例的权限。
 4. 文件接口接受绝对路径。`/delete_file` 会递归删除目标，只对清理后的 `/` 和 `.` 做了硬性拒绝。
 5. `/http_fetch` 可以访问容器网络中的地址；`/browser/evaluate` 可以在目标页面执行 JavaScript。
-6. 不要把 Token 写进仓库、URL、命令输出或可公开访问的日志。生产环境应通过 Secret 注入。
+6. 不要把任何 Token 写进仓库、命令输出或可公开访问的日志。Gateway Token 绝不能放进 URL；ModelScope Studio Token 由 helper 按平台要求加入请求查询参数。
 7. 容器应使用独立、最小权限的运行环境。只挂载任务需要的目录，不要挂载 Docker socket、宿主机根目录或敏感凭据目录。
 
 结构化端点在调用外部程序时尽量使用 argv 传参，避免路径、搜索词和输入文本被 shell 再解释；但 `/exec` 和异步任务本来就是 shell 接口，传入的 `command` 会按 shell 语义执行。调用方仍需对命令来源负责。

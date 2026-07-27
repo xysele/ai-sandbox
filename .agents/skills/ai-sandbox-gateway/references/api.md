@@ -5,11 +5,13 @@ Use this reference for request fields, response semantics, limits, and endpoint-
 ## Connection contract
 
 - Join an endpoint to the configured base URL without discarding a deployment path prefix. For example, base `https://host/proxy/7860` plus `/exec` becomes `https://host/proxy/7860/exec`.
+- On ModelScope, add the account's `studio_token` query parameter to every endpoint, including `/health`. The bundled helper reads it from the JSON credentials file and merges it with any existing query parameters.
 - Send `X-Gateway-Token: <token>` on every endpoint except `GET /`, `GET /health`, and `/favicon.ico`.
 - Send `Content-Type: application/json` with JSON requests.
 - Expect JSON responses. Most use `{"success":true,...}` or `{"success":false,"error":"..."}`.
 - Inspect JSON even on HTTP 200. Command failures and some operation failures use a 200 response with `success: false`.
 - Expect `401` with `invalid or missing X-Gateway-Token` for missing, stale, or incorrect credentials.
+- Treat a ModelScope-shaped `403` as outer Studio authentication failure, not a response from the gateway.
 - Treat `404 no such endpoint` as a path/base-URL error rather than success.
 
 ## Service and execution

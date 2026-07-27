@@ -8,12 +8,11 @@ import base64
 import binascii
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any, Optional
-from urllib import error, request
-
+from urllib import error, parse, request
 
 TERMINAL_TASK_STATES = {"completed", "failed", "cancelled"}
 
@@ -23,14 +22,37 @@ class GatewayError(Exception):
 
 
 class GatewayClient:
-    def __init__(self, base_url: str, token: Optional[str], timeout: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: Optional[str],
+        timeout: float,
+        studio_token: Optional[str] = None,
+    ) -> None:
         if not base_url:
             raise GatewayError(
                 "gateway URL is required; set AI_SANDBOX_URL or pass --url"
             )
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.studio_token = studio_token
         self.timeout = timeout
+
+    def _endpoint_url(self, endpoint: str) -> str:
+        base = parse.urlsplit(self.base_url)
+        target = parse.urlsplit(endpoint)
+        if target.scheme or target.netloc:
+            raise GatewayError("endpoint must be a path, not an absolute URL")
+
+        path = base.path.rstrip("/") + "/" + target.path.lstrip("/")
+        query = parse.parse_qsl(base.query, keep_blank_values=True)
+        query.extend(parse.parse_qsl(target.query, keep_blank_values=True))
+        if self.studio_token:
+            query = [(key, value) for key, value in query if key != "studio_token"]
+            query.append(("studio_token", self.studio_token))
+        return parse.urlunsplit(
+            (base.scheme, base.netloc, path, parse.urlencode(query), "")
+        )
 
     def call(
         self,
@@ -43,7 +65,8 @@ class GatewayClient:
             endpoint = "/" + endpoint
         if require_token and not self.token:
             raise GatewayError(
-                "gateway token is required; set GATEWAY_TOKEN or pass --token"
+                "gateway token is required; configure AI_SANDBOX_CREDENTIALS "
+                "or GATEWAY_TOKEN"
             )
 
         body = None
@@ -55,7 +78,7 @@ class GatewayClient:
             headers["X-Gateway-Token"] = self.token
 
         req = request.Request(
-            self.base_url + endpoint,
+            self._endpoint_url(endpoint),
             data=body,
             headers=headers,
             method=method.upper(),
@@ -70,7 +93,9 @@ class GatewayClient:
         except error.URLError as exc:
             raise GatewayError(f"cannot reach gateway: {exc.reason}") from exc
         except TimeoutError as exc:
-            raise GatewayError(f"gateway request timed out after {self.timeout:g}s") from exc
+            raise GatewayError(
+                f"gateway request timed out after {self.timeout:g}s"
+            ) from exc
 
         try:
             result = json.loads(raw)
@@ -112,6 +137,35 @@ def _load_json(value: Optional[str], filename: Optional[str]) -> Optional[Any]:
     return None
 
 
+def _load_credentials(filename: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if not filename:
+        return None, None
+    path = Path(filename).expanduser()
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise GatewayError(f"cannot read credentials file {path}: {exc}") from exc
+    if not raw:
+        raise GatewayError(f"credentials file {path} is empty")
+
+    if not raw.startswith("{"):
+        return raw, None
+    try:
+        credentials = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise GatewayError(f"invalid JSON in credentials file {path}: {exc}") from exc
+    if not isinstance(credentials, dict):
+        raise GatewayError(f"credentials file {path} must contain a JSON object")
+
+    values: list[Optional[str]] = []
+    for key in ("gateway_token", "studio_token"):
+        value = credentials.get(key)
+        if value is not None and not isinstance(value, str):
+            raise GatewayError(f"credentials field {key} must be a string")
+        values.append(value.strip() if value else None)
+    return values[0], values[1]
+
+
 def _parse_env(values: list[str]) -> dict[str, str]:
     parsed: dict[str, str] = {}
     for value in values:
@@ -138,8 +192,15 @@ def _client_from_args(args: argparse.Namespace) -> GatewayClient:
         or os.environ.get("SANDBOX_BASE_URL")
         or ""
     )
-    token = args.token or os.environ.get("GATEWAY_TOKEN")
-    return GatewayClient(base_url, token, args.request_timeout)
+    credentials_file = args.credentials or os.environ.get("AI_SANDBOX_CREDENTIALS")
+    file_token, file_studio_token = _load_credentials(credentials_file)
+    token = args.token or os.environ.get("GATEWAY_TOKEN") or file_token
+    studio_token = (
+        args.studio_token
+        or os.environ.get("MODELSCOPE_STUDIO_TOKEN")
+        or file_studio_token
+    )
+    return GatewayClient(base_url, token, args.request_timeout, studio_token)
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -247,7 +308,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--url",
         help="gateway base URL (env: AI_SANDBOX_URL or SANDBOX_BASE_URL)",
     )
-    parser.add_argument("--token", help="gateway token (prefer env: GATEWAY_TOKEN)")
+    parser.add_argument("--token", help="gateway token (prefer credentials file)")
+    parser.add_argument(
+        "--studio-token",
+        help="ModelScope Studio token (prefer credentials file)",
+    )
+    parser.add_argument(
+        "--credentials",
+        help="JSON credentials file (env: AI_SANDBOX_CREDENTIALS)",
+    )
     parser.add_argument(
         "--request-timeout",
         type=float,

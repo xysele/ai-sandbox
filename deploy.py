@@ -27,7 +27,7 @@ DEFAULT_WAIT_TIMEOUT = 900
 DEFAULT_POLL_INTERVAL = 10
 REQUEST_TIMEOUT = 30
 REPO_ROOT = Path(__file__).resolve().parent
-TOKEN_FILE = REPO_ROOT / "cs_token.txt"
+CREDENTIALS_FILE = REPO_ROOT / "cs_token.txt"
 TERMINAL_FAILURE_STATES = {"Failed", "Error", "DeployFailed", "CreateFailed"}
 NON_FATAL_RESTART_MESSAGES = ("data is changing", "Please wait", "数据变更中")
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -286,19 +286,60 @@ def _read_access_key() -> str:
 
 
 def _read_gateway_token() -> tuple[str, str]:
-    configured = os.environ.get("GATEWAY_TOKEN")
+    configured = os.environ.get("GATEWAY_TOKEN", "").strip()
     if configured:
         return configured, "GATEWAY_TOKEN"
-    if TOKEN_FILE.is_file():
-        existing = TOKEN_FILE.read_text(encoding="utf-8").strip()
+    if CREDENTIALS_FILE.is_file():
+        existing = CREDENTIALS_FILE.read_text(encoding="utf-8").strip()
+        if existing.startswith("{"):
+            try:
+                credentials = json.loads(existing)
+            except json.JSONDecodeError as exc:
+                raise DeploymentError(
+                    f"Invalid JSON in credentials file {CREDENTIALS_FILE}: {exc}"
+                ) from exc
+            if not isinstance(credentials, dict):
+                raise DeploymentError(
+                    f"Credentials file {CREDENTIALS_FILE} must contain a JSON object"
+                )
+            existing = credentials.get("gateway_token")
+            if not isinstance(existing, str) or not existing.strip():
+                raise DeploymentError(
+                    f"Credentials file {CREDENTIALS_FILE} has no gateway_token"
+                )
+            existing = existing.strip()
         if existing:
-            return existing, str(TOKEN_FILE)
+            return existing, str(CREDENTIALS_FILE)
     return secrets.token_urlsafe(32), "generated"
 
 
-def _save_gateway_token(token: str) -> None:
-    TOKEN_FILE.write_text(token, encoding="utf-8")
-    TOKEN_FILE.chmod(0o600)
+def _save_credentials(gateway_token: str, studio_token: str) -> None:
+    payload = (
+        json.dumps(
+            {
+                "gateway_token": gateway_token,
+                "studio_token": studio_token,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    temporary = CREDENTIALS_FILE.with_name(
+        f".{CREDENTIALS_FILE.name}.{secrets.token_hex(8)}.tmp"
+    )
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        os.replace(temporary, CREDENTIALS_FILE)
+        CREDENTIALS_FILE.chmod(0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _run_git(args: list[str], env: Optional[Dict[str, str]] = None) -> str:
@@ -639,6 +680,9 @@ def deploy(args: argparse.Namespace) -> int:
     print("Logging in...")
     client = ModelScopeClient()
     login_data = client.login(access_key)
+    studio_token = client.get_studio_token().strip()
+    if not studio_token:
+        raise DeploymentError("ModelScope returned no Studio access token")
 
     namespace = _validate_name(
         "namespace", args.namespace or str(login_data.get("Username") or "")
@@ -694,8 +738,8 @@ def deploy(args: argparse.Namespace) -> int:
     )
 
     action = client.set_env(namespace, studio_name, "GATEWAY_TOKEN", gateway_token)
-    _save_gateway_token(gateway_token)
-    print(f"GATEWAY_TOKEN {action}; local copy: {TOKEN_FILE.name} ({token_source}).")
+    _save_credentials(gateway_token, studio_token)
+    print(f"GATEWAY_TOKEN {action} ({token_source}).")
 
     print("Triggering reset_restart...")
     client.reset_restart(namespace, studio_name)
@@ -710,7 +754,6 @@ def deploy(args: argparse.Namespace) -> int:
         )
 
     detail = client.get_studio(namespace, studio_name) or detail
-    studio_token = client.get_studio_token()
     studio_page = f"{MODELSCOPE_ENDPOINT}/studios/{namespace}/{studio_name}"
     independent_url = str(detail.get("IndependentUrl") or "")
 
@@ -719,16 +762,12 @@ def deploy(args: argparse.Namespace) -> int:
     print(f"Status: {status.get('Status')}")
     if independent_url:
         print(f"Runtime base URL: {independent_url}")
-        if studio_token:
-            health_url = (
-                independent_url.rstrip("/")
-                + "/health?"
-                + parse.urlencode({"studio_token": studio_token})
-            )
-            print(f"Tokenized health URL: {health_url}")
     else:
         print("Runtime URL is not available yet; check the Studio page after startup.")
-    print(f"Gateway token is stored in {TOKEN_FILE} and was not printed.")
+    print(
+        f"Gateway and Studio tokens are stored in {CREDENTIALS_FILE} "
+        "and were not printed."
+    )
     return 0
 
 
