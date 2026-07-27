@@ -16,7 +16,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o ai-sandbox-go -ldflags="-w -s" .
 # official Node image because Debian Bullseye only provides Node.js 12.
 FROM node:20-bullseye-slim
 
-ENV NODE_PATH=/usr/local/lib/node_modules \
+ENV PATH=/usr/local/go/bin:${PATH} \
+    NODE_PATH=/usr/local/lib/node_modules \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install virtual desktop, GUI automation tools, and development tools
@@ -26,6 +27,7 @@ ENV NODE_PATH=/usr/local/lib/node_modules \
 #   scrot      - Screenshot tool
 #   imagemagick - Backup screenshot/image processing
 #   git        - Version control
+#   build-essential - C/C++ compiler and build tools for CGO projects
 #   python3    - Python runtime
 #   python3-pip - Python package manager
 #   Node.js/npm are provided by the base image
@@ -41,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         x11-utils \
         git \
+        build-essential \
         python3 \
         python3-pip \
         vim \
@@ -69,7 +72,8 @@ RUN npm install -g playwright-chromium@1.40.0 && \
 
 WORKDIR /app
 
-# Copy binary from builder
+# Keep the Go toolchain in the runtime image for remote Go development.
+COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder /build/ai-sandbox-go .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh /app/ai-sandbox-go

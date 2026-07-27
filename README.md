@@ -58,7 +58,7 @@ curl -sS http://127.0.0.1:7860/exec \
 
 ### Docker
 
-Docker 镜像包含项目预期的完整工具集：
+Docker 镜像包含项目预期的完整工具集，包括 Go 工具链和支持 CGO 的基础编译工具：
 
 ```bash
 docker build -t ai-sandbox-go .
@@ -166,7 +166,7 @@ curl -sS "$SANDBOX_URL/run_code" \
   }'
 ```
 
-支持的 `language` 值为 `python`、`bash`、`node` 和 `go`。接口支持某种语言不等于当前镜像中一定安装了相应解释器，应以 `/health` 返回的 `runtimes` 为准。默认 Docker 镜像没有安装 Go 工具链，因此容器中的 `go` 通常为 `false`。
+支持的 `language` 值为 `python`、`bash`、`node` 和 `go`。默认 Docker 镜像包含这四种运行时，以及编译常见 CGO 项目所需的基础 C/C++ 工具。自定义镜像可以裁剪运行时，实际可用性仍应以 `/health` 返回的 `runtimes` 为准。
 
 ### 长任务
 
